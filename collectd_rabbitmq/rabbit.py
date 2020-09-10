@@ -19,10 +19,10 @@ python plugin for collectd to obtain rabbitmq stats
 """
 
 import collectd
-import json
 import ssl
 import urllib
-import urllib2
+import requests
+from requests.auth import HTTPBasicAuth
 
 
 class RabbitMQStats(object):
@@ -32,6 +32,7 @@ class RabbitMQStats(object):
     def __init__(self, config):
         self.config = config
         self.api = "{0}/api".format(self.config.connection.url)
+        self.session = None
 
     @staticmethod
     def get_names(items):
@@ -47,54 +48,35 @@ class RabbitMQStats(object):
                 names.append(name)
         return names
 
+    def start_session(self):
+        session = requests.Session()
+        session.auth = HTTPBasicAuth(self.config.auth.username,
+                                     self.config.auth.password)
+        session.verify = self.config.connection.validate_certs
+        self.session = session
+
+    def close_session(self):
+        self.session.close()
+        self.session = None
+
     def get_info(self, *args):
         """
         return JSON object from URL.
         """
-        handlers = []
-        if self.config.connection.validate_certs is False:
-            ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
-            ctx.options |= ssl.OP_NO_SSLv2
-            ctx.options |= ssl.OP_NO_SSLv3
-            ctx.verify_mode = ssl.CERT_NONE
-            ctx.check_hostname = False
-            handlers.append(urllib2.HTTPSHandler(context=ctx))
 
         url = "{0}/{1}".format(self.api, '/'.join(args))
         collectd.debug("Getting info for %s" % url)
 
-        auth_handler = urllib2.HTTPBasicAuthHandler()
-        auth_handler.add_password(realm=self.config.auth.realm,
-                                  uri=self.api,
-                                  user=self.config.auth.username,
-                                  passwd=self.config.auth.password)
-
-        handlers.append(auth_handler)
-
-        opener = urllib2.build_opener(*handlers)
-        urllib2.install_opener(opener)
-
         try:
-            info = urllib2.urlopen(url)
-        except urllib2.HTTPError as http_error:
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as http_error:
             collectd.error("HTTP Error: %s" % http_error)
-            return None
-        except urllib2.URLError as url_error:
-            collectd.error("URL Error: %s" % url_error)
             return None
         except ValueError as value_error:
             collectd.error("Value Error: %s" % value_error)
             return None
-
-        try:
-            return_value = json.load(info)
-        except ValueError as err:
-            collectd.error("ValueError parsing JSON from %s: %s" % (url, err))
-            return_value = None
-        except TypeError as err:
-            collectd.error("TypeError parsing JSON from %s: %s" % (url, err))
-            return_value = None
-        return return_value
 
     def get_nodes(self):
         """

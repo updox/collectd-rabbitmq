@@ -125,11 +125,15 @@ class CollectdPlugin(object):
         """
         Dispatches values to collectd.
         """
-        self.dispatch_nodes()
-        self.dispatch_overview()
-        for vhost_name in self.rabbit.vhost_names:
-            self.dispatch_exchanges(vhost_name)
-            self.dispatch_queues(vhost_name)
+        self.rabbit.start_session()
+        try:
+            self.dispatch_nodes()
+            self.dispatch_overview()
+            for vhost_name in self.rabbit.vhost_names:
+                self.dispatch_exchanges(vhost_name)
+                self.dispatch_queues(vhost_name)
+        finally:
+            self.rabbit.close_session()
 
     def generate_vhost_name(self, name):
         """
@@ -359,7 +363,6 @@ class CollectdPlugin(object):
         except Exception as ex:
             collectd.warning("Failed to dispatch %s. Exception %s" %
                              (path, ex))
-
 
 # Register callbacks
 collectd.register_config(configure)
